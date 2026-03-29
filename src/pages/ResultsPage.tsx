@@ -60,6 +60,98 @@ function fmtDate(iso: string): string {
   });
 }
 
+function csvEscape(val: string): string {
+  const s = String(val ?? "");
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function exportCsv(rows: EvaluationRow[]) {
+  const headers = [
+    "submission_id",
+    "question_id",
+    "judge_name",
+    "verdict",
+    "reasoning",
+    "created_at",
+  ];
+  const lines = rows.map((e) =>
+    [
+      e.submission_id,
+      e.question_id,
+      e.judges?.name ?? "",
+      e.verdict,
+      e.reasoning,
+      e.created_at,
+    ]
+      .map(csvEscape)
+      .join(",")
+  );
+  const csv = [headers.join(","), ...lines].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `scoreio-report-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildMarkdownSummary(rows: EvaluationRow[]): string {
+  const date = new Date().toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const total = rows.length;
+  const passCount = rows.filter((e) => e.verdict === "pass").length;
+  const failCount = rows.filter((e) => e.verdict === "fail").length;
+  const incCount = rows.filter((e) => e.verdict === "inconclusive").length;
+  const passRate = total > 0 ? Math.round((passCount / total) * 100) : 0;
+
+  const byJudge = new Map<
+    string,
+    { name: string; pass: number; fail: number; inconclusive: number; total: number }
+  >();
+  for (const e of rows) {
+    const name = e.judges?.name ?? e.judge_id;
+    if (!byJudge.has(e.judge_id)) {
+      byJudge.set(e.judge_id, { name, pass: 0, fail: 0, inconclusive: 0, total: 0 });
+    }
+    const entry = byJudge.get(e.judge_id)!;
+    entry.total++;
+    entry[e.verdict]++;
+  }
+
+  const judgeRows = Array.from(byJudge.values())
+    .map(
+      (j) =>
+        `| ${j.name} | ${j.pass} | ${j.fail} | ${j.inconclusive} | ${
+          j.total > 0 ? Math.round((j.pass / j.total) * 100) : 0
+        }% |`
+    )
+    .join("\n");
+
+  return `## scoreio QA Report
+**Date**: ${date}
+**Total Evaluations**: ${total}
+**Pass Rate**: ${passRate}%
+
+### Verdict Summary
+| Verdict | Count |
+|---------|-------|
+| Pass | ${passCount} |
+| Fail | ${failCount} |
+| Inconclusive | ${incCount} |
+
+### Results by Judge
+| Judge | Pass | Fail | Inconclusive | Pass Rate |
+|-------|------|------|--------------|-----------|
+${judgeRows}`;
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function ResultsPage() {
@@ -71,8 +163,8 @@ export default function ResultsPage() {
   const [selectedJudges, setSelectedJudges] = useState<string[]>([]);
   const [selectedQuestions, setSelectedQuestions] = useState<string[]>([]);
   const [selectedVerdicts, setSelectedVerdicts] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
 
-  // ── filter options derived from raw data ──
   const judgeOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const e of evaluations) {
@@ -93,7 +185,6 @@ export default function ResultsPage() {
     { value: "inconclusive", label: "Inconclusive" },
   ];
 
-  // ── filtered rows ──
   const filtered = useMemo(() => {
     return evaluations.filter((e) => {
       if (selectedJudges.length > 0 && !selectedJudges.includes(e.judge_id))
@@ -103,21 +194,16 @@ export default function ResultsPage() {
         !selectedQuestions.includes(e.question_id)
       )
         return false;
-      if (
-        selectedVerdicts.length > 0 &&
-        !selectedVerdicts.includes(e.verdict)
-      )
+      if (selectedVerdicts.length > 0 && !selectedVerdicts.includes(e.verdict))
         return false;
       return true;
     });
   }, [evaluations, selectedJudges, selectedQuestions, selectedVerdicts]);
 
-  // ── aggregate stats ──
   const passCount = filtered.filter((e) => e.verdict === "pass").length;
   const passRate =
     filtered.length > 0 ? Math.round((passCount / filtered.length) * 100) : 0;
 
-  // ── per-judge pass rate for chart ──
   const chartData = useMemo(() => {
     const byJudge = new Map<
       string,
@@ -139,7 +225,13 @@ export default function ResultsPage() {
     }));
   }, [filtered]);
 
-  // ── empty / loading / error ──
+  function handleCopySummary() {
+    navigator.clipboard.writeText(buildMarkdownSummary(filtered)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   if (isLoading) {
     return <p className="text-gray-400 text-sm mt-8 text-center">Loading…</p>;
   }
@@ -159,10 +251,7 @@ export default function ResultsPage() {
         <p className="text-gray-400 text-xs mb-4">
           Upload submissions, assign judges to questions, then run evaluations.
         </p>
-        <Link
-          to="/upload"
-          className="text-sm text-blue-600 hover:underline"
-        >
+        <Link to="/upload" className="text-sm text-blue-600 hover:underline">
           Upload submissions →
         </Link>
       </div>
@@ -238,6 +327,86 @@ export default function ResultsPage() {
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* ── BONUS 3: export for customer delivery ── */}
+      <div className="mb-5 p-3 border border-gray-200 rounded-lg flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-xs font-medium text-gray-700">
+            Export for Customer Delivery
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {filtered.length} evaluation{filtered.length !== 1 ? "s" : ""} visible
+            {filtered.length !== evaluations.length ? " (filtered)" : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => exportCsv(filtered)}
+            className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors flex items-center gap-1.5"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleCopySummary}
+            className={`px-3 py-1.5 text-xs border rounded transition-colors flex items-center gap-1.5 ${
+              copied
+                ? "border-green-300 text-green-600 bg-green-50"
+                : "border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800"
+            }`}
+          >
+            {copied ? (
+              <>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Copied!
+              </>
+            ) : (
+              <>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+                Copy Summary
+              </>
+            )}
+          </button>
+        </div>
+      </div>
 
       {/* ── filters ── */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -321,7 +490,9 @@ export default function ResultsPage() {
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${VERDICT_STYLES[e.verdict]}`}
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+                          VERDICT_STYLES[e.verdict]
+                        }`}
                       >
                         {e.verdict}
                       </span>
@@ -399,7 +570,7 @@ function MultiSelect({
         onClick={() => setOpen((o) => !o)}
         className={`px-3 py-1.5 text-xs border rounded flex items-center gap-1.5 transition-colors ${
           selected.length > 0
-            ? "border-black text-black bg-gray-50"
+            ? "border-[#D4522A] text-[#D4522A] bg-[rgba(212,82,42,0.08)]"
             : "border-gray-300 text-gray-600 hover:border-gray-400"
         }`}
       >

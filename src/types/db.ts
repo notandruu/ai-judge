@@ -15,6 +15,7 @@ export interface SubmissionJson {
   createdAt: number;
   questions: SubmissionQuestion[];
   answers: Record<string, SubmissionAnswer>;
+  [key: string]: unknown;
 }
 
 export interface SubmissionQuestion {
@@ -57,4 +58,20 @@ export interface Evaluation {
   verdict: Verdict;
   reasoning: string;
   created_at: string;
+}
+
+export interface Attachment {
+  id: string;
+  submission_id: string;
+  file_name: string;
+  file_url: string;
+  media_type: string;
+  created_at: string;
+}
+
+export interface FieldConfig {
+  questionText: boolean;
+  answerChoice: boolean;
+  answerReasoning: boolean;
+  metadata: boolean;
 }

@@ -2,7 +2,24 @@
 
 ## Overview
 
-AI Judge is an internal annotation review tool that runs LLM-based evaluations against human-labeled submission queues. Users upload a JSON batch of submissions, define AI judges with custom rubrics and model assignments, assign judges to questions within a queue, and trigger evaluations that persist pass/fail/inconclusive verdicts to Postgres. Results are browsable with per-judge pass-rate charts and multi-axis filters. Stack: React 19 + TypeScript + Vite, Tailwind CSS v4, Supabase (Postgres + Edge Functions), React Query, Recharts.
+AI Judge is an internal annotation review tool that runs LLM-based evaluations against human-labeled submission queues. Users upload a JSON batch of submissions, define AI judges with custom rubrics and model assignments, assign judges to questions within a queue, and trigger evaluations that persist pass/fail/inconclusive verdicts to Postgres. Results are browsable with per-judge pass-rate charts and multi-axis filters. Stack: React 19 + TypeScript + Vite, Tailwind CSS v4, Supabase (Postgres + Storage + Edge Functions), React Query, Recharts.
+
+## Features
+
+**Core**
+- `/upload` — drag-and-drop JSON ingestion, upserts submissions to Postgres
+- `/judges` — full CRUD for AI judges: name, system prompt, model, active toggle
+- `/queue/:queueId` — assign judges to individual questions, then run all evaluations in one click
+- `/results` — filterable table of every evaluation with pass-rate stats and an animated per-judge bar chart
+
+**Bonus: Prompt Field Selector**
+A collapsible "Prompt Configuration" panel on the queue page lets users toggle which fields are included in the LLM prompt: question text, answer choice, answer reasoning, and submission metadata (any extra fields in `raw_json` beyond the core schema). Selections are persisted in `localStorage` and sent to the edge function on each run so the LLM only sees what is relevant.
+
+**Bonus: Media File Attachments**
+After uploading a JSON batch, users can attach `.wav`, `.mp3`, `.mp4`, `.pdf`, `.png`, or `.jpg` files to specific submissions. Files are stored in a Supabase Storage public bucket (`attachments`) and metadata is recorded in a dedicated `attachments` table. On the queue page, submissions with attachments show a paperclip indicator. When evaluations run, image attachments are passed as vision content blocks to capable models (`claude-*`, `gpt-4o`). Audio attachments inject a text note — "Audio file attached: [name]. Evaluate based on the transcription/answer provided." — since full Whisper transcription is out of scope.
+
+**Bonus: Dataset Quality Report Export**
+The results page includes an "Export for Customer Delivery" bar with two actions: "Export CSV" downloads all visible (filter-respecting) evaluations as a CSV with columns `submission_id`, `question_id`, `judge_name`, `verdict`, `reasoning`, `created_at`. "Copy Summary" copies a markdown-formatted QA report to the clipboard with overall pass rate, per-verdict counts, and a per-judge breakdown table — ready to paste into Notion, Slack, or a customer delivery doc.
 
 ## Architecture Decisions
 
@@ -22,13 +39,16 @@ npm install
 cp .env.example .env
 # Fill in VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY
 
-# 3. Push the database schema
+# 3. Push the database schema (includes attachments table)
 npx supabase db push
 
 # 4. Deploy the edge function
 # First add SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
 # to Supabase Dashboard → Project Settings → Edge Functions → Secrets
 npx supabase functions deploy run-evaluations --no-verify-jwt
+
+# 5. Create a public Supabase Storage bucket named "attachments"
+# Dashboard → Storage → New bucket → name: attachments → Public: on
 
 # 5. Start the dev server
 npm run dev

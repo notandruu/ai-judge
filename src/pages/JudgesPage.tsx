@@ -125,10 +125,11 @@ export default function JudgesPage() {
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">AI Judges</h1>
+        <h1 className="text-2xl font-semibold">Judges</h1>
         <button
           onClick={openCreate}
-          className="px-3 py-1.5 bg-black text-white text-sm rounded hover:bg-gray-800"
+          className="px-3 py-1.5 text-white text-sm rounded"
+          style={{ backgroundColor: "#D4522A" }}
         >
           + New Judge
         </button>
@@ -320,7 +321,8 @@ function JudgeForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="px-3 py-1.5 bg-black text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50"
+          className="px-3 py-1.5 text-white text-sm rounded disabled:opacity-50"
+          style={{ backgroundColor: "#D4522A" }}
         >
           {isSubmitting ? "Saving…" : "Save"}
         </button>
